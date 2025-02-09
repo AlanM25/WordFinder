@@ -68,7 +68,6 @@ class Window(QtWidgets.QWidget):
         self.showImage()
 
     def showImage(self):
-        # Convert image to RGB (OpenCV uses BGR)
         image_rgb = cv2.cvtColor(self.image, cv2.COLOR_BGR2RGB)
         height, width, _ = image_rgb.shape
         bytes_per_line = 3 * width
@@ -77,7 +76,7 @@ class Window(QtWidgets.QWidget):
         self.viewer.setPixmap(pixmap)
 
     def handleSearch(self):
-        palabra = self.textInput.text().strip()
+        palabra = self.textInput.text().strip().upper()
         if not palabra:
             QtWidgets.QMessageBox.warning(self, "Error", "Por favor ingresa una palabra.")
             return
@@ -85,44 +84,74 @@ class Window(QtWidgets.QWidget):
 
     def buscarPalabra(self, palabra):
         gray = cv2.cvtColor(self.image, cv2.COLOR_BGR2GRAY)
-        edged = cv2.Canny(gray, 30, 200)
-        contours, _ = cv2.findContours(edged, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+        _, thresh = cv2.threshold(gray, 150, 255, cv2.THRESH_BINARY_INV)
+        contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
         resultado = self.image_copy.copy()
+        letras_detectadas = []
 
-        # Aquí iría la lógica para detectar las letras
-        # Recorrer contornos y buscar coincidencias de letras
+        # Detectar letras y sus posiciones
         for c in contours:
             letter_coords = self.detectarLetra(c)
             if letter_coords:
                 x, y, w, h = letter_coords
-                cv2.rectangle(resultado, (x, y), (x + w, y + h), (0, 255, 0), 2)
+                letra_img = thresh[y:y+h, x:x+w]
+                letra_img_resized = cv2.resize(letra_img, (20, 20))
+                letra = self.reconocerLetra(letra_img_resized)
+                if letra != '?':  # Ignorar letras desconocidas
+                    letras_detectadas.append((letra, (x, y, w, h)))
+
+        # Ordenar las letras detectadas por posición (de izquierda a derecha y de arriba a abajo)
+        letras_detectadas.sort(key=lambda l: (l[1][1], l[1][0]))
+
+        # Buscar la palabra en la secuencia de letras detectadas
+        secuencia_letras = ''.join([letra for letra, _ in letras_detectadas])
+        if palabra in secuencia_letras:
+            QtWidgets.QMessageBox.information(self, "Resultado", f"Palabra '{palabra}' encontrada.")
+
+            # Marcar las letras de la palabra encontrada
+            start_index = secuencia_letras.find(palabra)
+            for i in range(start_index, start_index + len(palabra)):
+                _, (x, y, w, h) = letras_detectadas[i]
+                cv2.rectangle(resultado, (x, y), (x + w, y + h), (255, 0, 0), 2)  # Marcar en rojo
+        else:
+            QtWidgets.QMessageBox.warning(self, "Resultado", f"Palabra '{palabra}' no encontrada.")
 
         # Mostrar la imagen con las letras marcadas
         self.mostrarEnViewer2(resultado)
 
     def detectarLetra(self, c):
-        # Calcular momentos para cada contorno
         M = cv2.moments(c)
         if M["m00"] > 0:
-            cX = int(M["m10"] / M["m00"])
-            cY = int(M["m01"] / M["m00"])
-
-            # Obtener el rectángulo delimitador de cada contorno
             x, y, w, h = cv2.boundingRect(c)
-
-            # Si el área del contorno es suficientemente grande, puede ser una letra
             area = cv2.contourArea(c)
             if area > 300:  # Filtrar los contornos más pequeños
                 return (x, y, w, h)
         return None
 
+    def reconocerLetra(self, letra_img):
+        letras = {
+            'C': 'abecedario/c.png',
+            'O': 'abecedario/o.png',
+        }
+
+        for letra, img_path in letras.items():
+            letra_ref = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
+            if letra_ref is None:
+                print(f"Error: No se pudo cargar la imagen para la letra '{letra}' en '{img_path}'")
+                continue
+
+            letra_ref_resized = cv2.resize(letra_ref, (20, 20))
+            if np.array_equal(letra_img, letra_ref_resized):
+                return letra
+
+        return '?'  # Retorna '?' si no se reconoce la letra
+
     def mostrarEnViewer2(self, imagen):
-        # Convertir la imagen con las letras marcadas a formato que PyQt pueda mostrar
         image_rgb = cv2.cvtColor(imagen, cv2.COLOR_BGR2RGB)
         height, width, _ = image_rgb.shape
         bytes_per_line = 3 * width
-        q_image = QtGui.QImage(image_rgb.data, width, height, bytes_per_line, QtGui.QImage.Format.Format_RGB888)
+        q_image = QtGui.QImage(imagen.data, width, height, bytes_per_line, QtGui.QImage.Format.Format_RGB888)
         pixmap = QtGui.QPixmap(q_image)
         self.viewer2.setPixmap(pixmap)
 
