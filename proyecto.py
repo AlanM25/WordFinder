@@ -74,27 +74,20 @@ class Window(QtWidgets.QWidget):
     def search_word(self):
         word = self.textInput.text()
         if word and self.image is not None:
-            # Restaurar la imagen original para eliminar cualquier marcado anterior
             self.image = self.original_image.copy()
-
-            # Convertir la imagen a escala de grises
             gray = cv2.cvtColor(self.image, cv2.COLOR_BGR2GRAY)
-            # Binarizar la imagen (umbral)
             _, thresh = cv2.threshold(gray, 127, 255, cv2.THRESH_BINARY_INV)
             
-            # Buscar la palabra en la sopa de letras
             contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
             self.mark_word_in_image(word, contours)
 
     def mark_word_in_image(self, word, contours):
-        """ Resalta las letras de la palabra en la imagen """
-        color = (0, 255, 0)  # Verde
+        color = (0, 255, 0)
         for contour in contours:
-            # Usamos bounding box para detectar las letras
             x, y, w, h = cv2.boundingRect(contour)
             roi = self.original_image[y:y+h, x:x+w]
             cv2.rectangle(self.image, (x, y), (x+w, y+h), color, 2)
-        self.display_image(self.image, self.viewer2)  # Mostrar en viewer2
+        self.display_image(self.image, self.viewer2)
 
 if __name__ == '__main__':
     import sys
