@@ -20,8 +20,9 @@ class Window(QtWidgets.QWidget):
         self.setGeometry(10, 10, 900, 600)
         self.center()
 
-        self.viewer = MiEtiqueta()  # View1
-        self.viewer2 = MiEtiqueta()  # View2
+        # Crear componentes
+        self.viewer = MiEtiqueta()  # Vista original
+        self.viewer2 = MiEtiqueta()  # Vista con la palabra marcada
 
         self.buttonOpen = QtWidgets.QPushButton("Abrir Imagen")
         BUTTON_SIZE = QSize(200, 50)
@@ -47,7 +48,7 @@ class Window(QtWidgets.QWidget):
         layout.addWidget(self.viewer, 1, 0, 1, 2)
         layout.addWidget(self.viewer2, 1, 2, 1, 2)
 
-        # Inicializador
+        # Inicializar imágenes
         self.image = None
         self.original_image = None
 
@@ -73,6 +74,9 @@ class Window(QtWidgets.QWidget):
     def search_word(self):
         word = self.textInput.text()
         if word and self.image is not None:
+            # Restaurar la imagen original para eliminar cualquier marcado anterior
+            self.image = self.original_image.copy()
+
             # Convertir la imagen a escala de grises
             gray = cv2.cvtColor(self.image, cv2.COLOR_BGR2GRAY)
             # Binarizar la imagen (umbral)
