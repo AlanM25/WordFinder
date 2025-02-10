@@ -1,7 +1,8 @@
-from PyQt6 import QtCore, QtGui, QtWidgets
-from PyQt6.QtCore import QSize, pyqtSignal
 import cv2
 import numpy as np
+from PyQt6 import QtCore, QtGui, QtWidgets
+from PyQt6.QtCore import QSize, pyqtSignal
+from PIL import Image, ImageQt
 
 class MiEtiqueta(QtWidgets.QLabel):
     clicked = pyqtSignal()
@@ -19,25 +20,25 @@ class Window(QtWidgets.QWidget):
         self.setGeometry(10, 10, 900, 600)
         self.center()
 
-        self.viewer = MiEtiqueta()
-        self.viewer2 = MiEtiqueta()
+        self.viewer = MiEtiqueta()  # View1
+        self.viewer2 = MiEtiqueta()  # View2
 
-        self.buttonOpen = QtWidgets.QPushButton("Open Image")
+        self.buttonOpen = QtWidgets.QPushButton("Abrir Imagen")
         BUTTON_SIZE = QSize(200, 50)
         self.buttonOpen.setMinimumSize(BUTTON_SIZE)
-        self.buttonOpen.clicked.connect(self.handleOpen)
+        self.buttonOpen.clicked.connect(self.upload_image)
 
         self.textInput = QtWidgets.QLineEdit()
         self.textInput.setMinimumSize(BUTTON_SIZE)
 
         self.enterButton = QtWidgets.QPushButton("Buscar")
         self.enterButton.setMinimumSize(BUTTON_SIZE)
-        self.enterButton.clicked.connect(self.handleSearch)
+        self.enterButton.clicked.connect(self.search_word)
 
         self.guardarImagen = QtWidgets.QPushButton("Guardar")
         self.guardarImagen.setMinimumSize(BUTTON_SIZE)
-        self.guardarImagen.clicked.connect(self.handleSave)
 
+        # Crear Layout
         layout = QtWidgets.QGridLayout(self)
         layout.addWidget(self.buttonOpen, 0, 0, 1, 1)
         layout.addWidget(self.guardarImagen, 0, 3, 1, 1)
@@ -46,9 +47,9 @@ class Window(QtWidgets.QWidget):
         layout.addWidget(self.viewer, 1, 0, 1, 2)
         layout.addWidget(self.viewer2, 1, 2, 1, 2)
 
+        # Inicializador
         self.image = None
-        self.image_copy = None
-        self._path = ""
+        self.original_image = None
 
     def center(self):
         qr = self.frameGeometry()
@@ -56,109 +57,40 @@ class Window(QtWidgets.QWidget):
         qr.moveCenter(cp)
         self.move(qr.topLeft())
 
-    def handleOpen(self):
-        path, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Choose File", "", "Images(*.jpg *.png)")
-        if path:
-            self._path = path
-            self.updateImage()
+    def upload_image(self):
+        file_path, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Seleccionar imagen", "", "Imágenes (*.png *.jpg *.bmp)")
+        if file_path:
+            self.image = cv2.imread(file_path)
+            self.original_image = self.image.copy()
+            self.display_image(self.image, self.viewer)
 
-    def updateImage(self):
-        self.image = cv2.imread(self._path)
-        self.image_copy = self.image.copy()
-        self.showImage()
+    def display_image(self, img, viewer):
+        qimg = ImageQt.ImageQt(Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB)))
+        pixmap = QtGui.QPixmap.fromImage(qimg)
+        viewer.setPixmap(pixmap)
+        viewer.setScaledContents(True)
 
-    def showImage(self):
-        image_rgb = cv2.cvtColor(self.image, cv2.COLOR_BGR2RGB)
-        height, width, _ = image_rgb.shape
-        bytes_per_line = 3 * width
-        q_image = QtGui.QImage(image_rgb.data, width, height, bytes_per_line, QtGui.QImage.Format.Format_RGB888)
-        pixmap = QtGui.QPixmap(q_image)
-        self.viewer.setPixmap(pixmap)
+    def search_word(self):
+        word = self.textInput.text()
+        if word and self.image is not None:
+            # Convertir la imagen a escala de grises
+            gray = cv2.cvtColor(self.image, cv2.COLOR_BGR2GRAY)
+            # Binarizar la imagen (umbral)
+            _, thresh = cv2.threshold(gray, 127, 255, cv2.THRESH_BINARY_INV)
+            
+            # Buscar la palabra en la sopa de letras
+            contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            self.mark_word_in_image(word, contours)
 
-    def handleSearch(self):
-        palabra = self.textInput.text().strip().upper()
-        if not palabra:
-            QtWidgets.QMessageBox.warning(self, "Error", "Por favor ingresa una palabra.")
-            return
-        self.buscarPalabra(palabra)
-
-    def buscarPalabra(self, palabra):
-        gray = cv2.cvtColor(self.image, cv2.COLOR_BGR2GRAY)
-        _, thresh = cv2.threshold(gray, 150, 255, cv2.THRESH_BINARY_INV)
-        contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-        resultado = self.image_copy.copy()
-        letras_detectadas = []
-
-        # Detectar letras y sus posiciones
-        for c in contours:
-            letter_coords = self.detectarLetra(c)
-            if letter_coords:
-                x, y, w, h = letter_coords
-                letra_img = thresh[y:y+h, x:x+w]
-                letra_img_resized = cv2.resize(letra_img, (20, 20))
-                letra = self.reconocerLetra(letra_img_resized)
-                if letra != '?':  # Ignorar letras desconocidas
-                    letras_detectadas.append((letra, (x, y, w, h)))
-
-        # Ordenar las letras detectadas por posición (de izquierda a derecha y de arriba a abajo)
-        letras_detectadas.sort(key=lambda l: (l[1][1], l[1][0]))
-
-        # Buscar la palabra en la secuencia de letras detectadas
-        secuencia_letras = ''.join([letra for letra, _ in letras_detectadas])
-        if palabra in secuencia_letras:
-            QtWidgets.QMessageBox.information(self, "Resultado", f"Palabra '{palabra}' encontrada.")
-
-            # Marcar las letras de la palabra encontrada
-            start_index = secuencia_letras.find(palabra)
-            for i in range(start_index, start_index + len(palabra)):
-                _, (x, y, w, h) = letras_detectadas[i]
-                cv2.rectangle(resultado, (x, y), (x + w, y + h), (255, 0, 0), 2)  # Marcar en rojo
-        else:
-            QtWidgets.QMessageBox.warning(self, "Resultado", f"Palabra '{palabra}' no encontrada.")
-
-        # Mostrar la imagen con las letras marcadas
-        self.mostrarEnViewer2(resultado)
-
-    def detectarLetra(self, c):
-        M = cv2.moments(c)
-        if M["m00"] > 0:
-            x, y, w, h = cv2.boundingRect(c)
-            area = cv2.contourArea(c)
-            if area > 300:  # Filtrar los contornos más pequeños
-                return (x, y, w, h)
-        return None
-
-    def reconocerLetra(self, letra_img):
-        letras = {
-            'C': 'abecedario/c.png',
-            'O': 'abecedario/o.png',
-        }
-
-        for letra, img_path in letras.items():
-            letra_ref = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
-            if letra_ref is None:
-                print(f"Error: No se pudo cargar la imagen para la letra '{letra}' en '{img_path}'")
-                continue
-
-            letra_ref_resized = cv2.resize(letra_ref, (20, 20))
-            if np.array_equal(letra_img, letra_ref_resized):
-                return letra
-
-        return '?'  # Retorna '?' si no se reconoce la letra
-
-    def mostrarEnViewer2(self, imagen):
-        image_rgb = cv2.cvtColor(imagen, cv2.COLOR_BGR2RGB)
-        height, width, _ = image_rgb.shape
-        bytes_per_line = 3 * width
-        q_image = QtGui.QImage(imagen.data, width, height, bytes_per_line, QtGui.QImage.Format.Format_RGB888)
-        pixmap = QtGui.QPixmap(q_image)
-        self.viewer2.setPixmap(pixmap)
-
-    def handleSave(self):
-        fileName, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Save File", "", "Images (*.jpg *.png)")
-        if fileName:
-            cv2.imwrite(fileName, self.image_copy)
+    def mark_word_in_image(self, word, contours):
+        """ Resalta las letras de la palabra en la imagen """
+        color = (0, 255, 0)  # Verde
+        for contour in contours:
+            # Usamos bounding box para detectar las letras
+            x, y, w, h = cv2.boundingRect(contour)
+            roi = self.original_image[y:y+h, x:x+w]
+            cv2.rectangle(self.image, (x, y), (x+w, y+h), color, 2)
+        self.display_image(self.image, self.viewer2)  # Mostrar en viewer2
 
 if __name__ == '__main__':
     import sys
