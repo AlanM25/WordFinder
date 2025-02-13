@@ -1,8 +1,6 @@
-import cv2
-import numpy as np
 from PyQt6 import QtCore, QtGui, QtWidgets
 from PyQt6.QtCore import QSize, pyqtSignal
-from PIL import Image, ImageQt
+import cv2
 
 
 class MiEtiqueta(QtWidgets.QLabel):
@@ -10,38 +8,55 @@ class MiEtiqueta(QtWidgets.QLabel):
 
     def __init__(self):
         super().__init__()
+        self.Lista = []
         self.setStyleSheet("border: 1px solid black;")
 
     def mousePressEvent(self, e):
+        self.x = e.position().x()
+        self.y = e.position().y()
+        self.Lista.append((self.x, self.y))
+        print(self.Lista)
         self.clicked.emit()
 
 
 class Window(QtWidgets.QWidget):
+    def Metodo(self):
+        for i in self.viewer.Lista:
+            ii = tuple(int(x) for x in i)
+            self.OpenCV_image = cv2.circle(self.OpenCV_image, ii, 10, (255, 255, 0), 4)
+        self.ActualizarPixMap()
+
+    def center(self):
+        qr = self.frameGeometry()
+        cp = self.screen().availableGeometry().center()
+        qr.moveCenter(cp)
+        self.move(qr.topLeft())
+
     def __init__(self):
         super().__init__()
         self.setGeometry(10, 10, 900, 600)
         self.center()
 
-        # Crear componentes
-        self.viewer = MiEtiqueta()  # Vista original
-        self.viewer2 = MiEtiqueta()  # Vista con la palabra marcada
+        self.viewer = MiEtiqueta()
+        self.viewer2 = MiEtiqueta()
+        self.viewer.clicked.connect(self.Metodo)
 
-        self.buttonOpen = QtWidgets.QPushButton("Abrir Imagen")
+        self.buttonOpen = QtWidgets.QPushButton("Open Image")
         BUTTON_SIZE = QSize(200, 50)
         self.buttonOpen.setMinimumSize(BUTTON_SIZE)
-        self.buttonOpen.clicked.connect(self.upload_image)
+        self.buttonOpen.clicked.connect(self.handleOpen)
 
         self.textInput = QtWidgets.QLineEdit()
         self.textInput.setMinimumSize(BUTTON_SIZE)
 
         self.enterButton = QtWidgets.QPushButton("Buscar")
         self.enterButton.setMinimumSize(BUTTON_SIZE)
-        self.enterButton.clicked.connect(self.search_letter)
+        self.enterButton.clicked.connect(self.handleTextInput)
 
         self.guardarImagen = QtWidgets.QPushButton("Guardar")
         self.guardarImagen.setMinimumSize(BUTTON_SIZE)
+        self.guardarImagen.clicked.connect(self.handleSaveFile)
 
-        # Crear Layout
         layout = QtWidgets.QGridLayout(self)
         layout.addWidget(self.buttonOpen, 0, 0, 1, 1)
         layout.addWidget(self.guardarImagen, 0, 3, 1, 1)
@@ -50,79 +65,42 @@ class Window(QtWidgets.QWidget):
         layout.addWidget(self.viewer, 1, 0, 1, 2)
         layout.addWidget(self.viewer2, 1, 2, 1, 2)
 
-        self.image = None
-        self.original_image = None
-        self.contour_A = None
+    def handleTextInput(self):
+        text = self.textInput.text()
+        print(f"Texto ingresado: {text}")
 
-    def center(self):
-        qr = self.frameGeometry()
-        cp = self.screen().availableGeometry().center()
-        qr.moveCenter(cp)
-        self.move(qr.topLeft())
+    def handleSaveFile(self):
+        fileName, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Save File", "", "Images(*.jpg *.png)")
+        if fileName:
+            cv2.imwrite(fileName, self.OpenCV_image)
 
-    def upload_image(self):
-        file_path, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Seleccionar imagen", "", "Imágenes (*.png *.jpg *.bmp)")
-        if file_path:
-            self.image = cv2.imread(file_path)
-            if self.image is None:
-                QtWidgets.QMessageBox.warning(self, "Error", "No se pudo cargar la imagen.")
-                return
-            self.original_image = self.image.copy()
-            self.display_image(self.image, self.viewer)
-            self.extract_contour_A()  # Extraer contorno de referencia de la letra 'A'
+    def handleOpen(self):
+        path = QtWidgets.QFileDialog.getOpenFileName(self, "Choose File", "./", "Images(*.jpg *.png)")[0]
+        if path:
+            self._path = path
+            self.ActualizarImagen()
 
-    def display_image(self, img, viewer):
-        # Convertir la imagen de OpenCV (BGR) a formato adecuado para PyQt6 (RGB)
-        img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        qimg = ImageQt.ImageQt(Image.fromarray(img_rgb))
-        pixmap = QtGui.QPixmap.fromImage(qimg)
-        viewer.setPixmap(pixmap)
-        viewer.setScaledContents(True)
+    def ActualizarPixMap(self):
+        QImageTemp = QtGui.QImage(cv2.cvtColor(self.OpenCV_image, cv2.COLOR_BGR2RGB),
+                                  self.OpenCV_image.shape[1],
+                                  self.OpenCV_image.shape[0],
+                                  self.OpenCV_image.shape[1] * 3,
+                                  QtGui.QImage.Format.Format_RGB888)
+        pixmap = QtGui.QPixmap(QImageTemp)
+        self.viewer.setPixmap(pixmap)
 
-    def extract_contour_A(self):
-        abecedario_path = "abecedario.png"  # Ruta del abecedario
-        abc = cv2.imread(abecedario_path)
-        if abc is None:
-            QtWidgets.QMessageBox.warning(self, "Error", "No se pudo cargar la imagen del abecedario.")
-            return
-        gray_abc = cv2.cvtColor(abc, cv2.COLOR_BGR2GRAY)
-        gray_abc = cv2.bilateralFilter(src=gray_abc, d=9, sigmaColor=75, sigmaSpace=75)
-        abc_edged = cv2.Canny(gray_abc, 30, 200)
-        abc_contours, _ = cv2.findContours(abc_edged, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        abc_contours = sorted(abc_contours, key=lambda c: cv2.boundingRect(c)[0])
-        if len(abc_contours) > 0:
-            self.contour_A = abc_contours[0]
-
-    def search_letter(self):
-        if self.image is None or self.contour_A is None:
-            QtWidgets.QMessageBox.warning(self, "Error", "Primero debe cargar una imagen y extraer el contorno de referencia.")
-            return
-
-        match_threshold = 0.33
-        gray = cv2.cvtColor(self.image, cv2.COLOR_BGR2GRAY)
-        gray = cv2.bilateralFilter(src=gray, d=9, sigmaColor=75, sigmaSpace=75)
-        edged = cv2.Canny(gray, 30, 200)
-        contours, _ = cv2.findContours(edged, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        contours = sorted(contours, key=lambda c: cv2.boundingRect(c)[0])
-
-        for c in contours:
-            if cv2.contourArea(c) < 50:
-                continue
-            similarity = cv2.matchShapes(self.contour_A, c, cv2.CONTOURS_MATCH_I1, 0.0)
-            if similarity < match_threshold:
-                hull = cv2.convexHull(c)
-                (x_center, y_center), radius = cv2.minEnclosingCircle(hull)
-                center = (int(x_center), int(y_center))
-                radius = int(radius)
-                cv2.circle(self.image, center, radius, (0, 255, 0), 2)
-
-        self.display_image(self.image, self.viewer2)
+    def ActualizarImagen(self):
+        self.OpenCV_image = cv2.imread(self._path)
+        tamano = (self.viewer.size().width(), self.viewer.size().height())
+        self.OpenCV_image = cv2.resize(self.OpenCV_image, tamano, interpolation=cv2.INTER_LINEAR)
+        self.ActualizarPixMap()
 
 
 if __name__ == '__main__':
     import sys
+
     app = QtWidgets.QApplication(sys.argv)
     window = Window()
-    window.setWindowTitle("Sopa de Letras")
+    window.setWindowTitle("Image Editor")
     window.show()
     sys.exit(app.exec())
