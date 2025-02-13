@@ -4,6 +4,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 from PyQt6.QtCore import QSize, pyqtSignal
 from PIL import Image, ImageQt
 
+
 class MiEtiqueta(QtWidgets.QLabel):
     clicked = pyqtSignal()
 
@@ -13,6 +14,7 @@ class MiEtiqueta(QtWidgets.QLabel):
 
     def mousePressEvent(self, e):
         self.clicked.emit()
+
 
 class Window(QtWidgets.QWidget):
     def __init__(self):
@@ -34,7 +36,7 @@ class Window(QtWidgets.QWidget):
 
         self.enterButton = QtWidgets.QPushButton("Buscar")
         self.enterButton.setMinimumSize(BUTTON_SIZE)
-        self.enterButton.clicked.connect(self.search_word)
+        self.enterButton.clicked.connect(self.search_letter)
 
         self.guardarImagen = QtWidgets.QPushButton("Guardar")
         self.guardarImagen.setMinimumSize(BUTTON_SIZE)
@@ -48,9 +50,9 @@ class Window(QtWidgets.QWidget):
         layout.addWidget(self.viewer, 1, 0, 1, 2)
         layout.addWidget(self.viewer2, 1, 2, 1, 2)
 
-        # Inicializar imágenes
         self.image = None
         self.original_image = None
+        self.contour_A = None
 
     def center(self):
         qr = self.frameGeometry()
@@ -62,32 +64,60 @@ class Window(QtWidgets.QWidget):
         file_path, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Seleccionar imagen", "", "Imágenes (*.png *.jpg *.bmp)")
         if file_path:
             self.image = cv2.imread(file_path)
+            if self.image is None:
+                QtWidgets.QMessageBox.warning(self, "Error", "No se pudo cargar la imagen.")
+                return
             self.original_image = self.image.copy()
             self.display_image(self.image, self.viewer)
+            self.extract_contour_A()  # Extraer contorno de referencia de la letra 'A'
 
     def display_image(self, img, viewer):
-        qimg = ImageQt.ImageQt(Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB)))
+        # Convertir la imagen de OpenCV (BGR) a formato adecuado para PyQt6 (RGB)
+        img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        qimg = ImageQt.ImageQt(Image.fromarray(img_rgb))
         pixmap = QtGui.QPixmap.fromImage(qimg)
         viewer.setPixmap(pixmap)
         viewer.setScaledContents(True)
 
-    def search_word(self):
-        word = self.textInput.text()
-        if word and self.image is not None:
-            self.image = self.original_image.copy()
-            gray = cv2.cvtColor(self.image, cv2.COLOR_BGR2GRAY)
-            _, thresh = cv2.threshold(gray, 127, 255, cv2.THRESH_BINARY_INV)
-            
-            contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            self.mark_word_in_image(word, contours)
+    def extract_contour_A(self):
+        abecedario_path = "abecedario.png"  # Ruta del abecedario
+        abc = cv2.imread(abecedario_path)
+        if abc is None:
+            QtWidgets.QMessageBox.warning(self, "Error", "No se pudo cargar la imagen del abecedario.")
+            return
+        gray_abc = cv2.cvtColor(abc, cv2.COLOR_BGR2GRAY)
+        gray_abc = cv2.bilateralFilter(src=gray_abc, d=9, sigmaColor=75, sigmaSpace=75)
+        abc_edged = cv2.Canny(gray_abc, 30, 200)
+        abc_contours, _ = cv2.findContours(abc_edged, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        abc_contours = sorted(abc_contours, key=lambda c: cv2.boundingRect(c)[0])
+        if len(abc_contours) > 0:
+            self.contour_A = abc_contours[0]
 
-    def mark_word_in_image(self, word, contours):
-        color = (0, 255, 0)
-        for contour in contours:
-            x, y, w, h = cv2.boundingRect(contour)
-            roi = self.original_image[y:y+h, x:x+w]
-            cv2.rectangle(self.image, (x, y), (x+w, y+h), color, 2)
+    def search_letter(self):
+        if self.image is None or self.contour_A is None:
+            QtWidgets.QMessageBox.warning(self, "Error", "Primero debe cargar una imagen y extraer el contorno de referencia.")
+            return
+
+        match_threshold = 0.33
+        gray = cv2.cvtColor(self.image, cv2.COLOR_BGR2GRAY)
+        gray = cv2.bilateralFilter(src=gray, d=9, sigmaColor=75, sigmaSpace=75)
+        edged = cv2.Canny(gray, 30, 200)
+        contours, _ = cv2.findContours(edged, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        contours = sorted(contours, key=lambda c: cv2.boundingRect(c)[0])
+
+        for c in contours:
+            if cv2.contourArea(c) < 50:
+                continue
+            similarity = cv2.matchShapes(self.contour_A, c, cv2.CONTOURS_MATCH_I1, 0.0)
+            if similarity < match_threshold:
+                hull = cv2.convexHull(c)
+                (x_center, y_center), radius = cv2.minEnclosingCircle(hull)
+                center = (int(x_center), int(y_center))
+                radius = int(radius)
+                cv2.circle(self.image, center, radius, (0, 255, 0), 2)
+
         self.display_image(self.image, self.viewer2)
+
 
 if __name__ == '__main__':
     import sys
