@@ -3,7 +3,7 @@ import numpy as np
 
 
 abecedario_path = "abecedario.png"
-letras_path = "letras.png"
+letras_path = "prueba1.jpg"
 #letras_path = "sopaNormal.jpg"
 
 
