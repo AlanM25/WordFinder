@@ -111,7 +111,7 @@ def get_rows(centers, row_amt, row_h):
         yield a[a.argsort(0)[:, 0]]
         
 def prepareDataset():
-    global abc, datasetCenters
+    global abc, datasetCenters, dataSimilarity
     abc = cv2.imread("dataset.png")
     abc = cv2.resize(abc, (800,800))
     abc = correct_perspective(abc)
@@ -126,6 +126,7 @@ def prepareDataset():
         for x, y in row:
             for letter in datasetCenters:
                 if(letter.getCenter() == (x,y)):
+                    letter.setSimilarity(dataSimilarity,count+1)
                     orderDataset.append(letter)
                     break
             count += 1
@@ -166,14 +167,58 @@ def prepareImg2():
     img2 = correct_perspective(img2)
     img2 = correct_perspective(img2)
     
-    
+def foundSentence(sentence, soup): 
+    sentence = sentence.upper()
+    found = []
+    result = []
+    for i in range(len(soup)):
+        letter = sentence[0]
+        if soup[i].containsLetter(letter):
+            subStr = sentence[1:]
+            found.append(soup[i])
+            for inc in [-13, -12,12, -11, -1, 1, 11, 13]:  # Iteramos sobre los incrementos
+                result = inLine(found.copy(), soup, subStr, inc, i)
+                if len(result) == len(sentence):
+                    print(len(result))
+                    return result
+        else:
+            found = []
         
+def inLine(found,soup,sentence, increment, i):
+    original = found
+    for letter in sentence:
+        i += increment
+        if not (i>0):
+            found = original
+            return found
+        try:
+            if soup[i].containsLetter(letter):
+                found.append(soup[i])
+            else:
+                found = original
+                return found
+        except IndexError:
+                found = original
+                return found
+    return found
+
+def finalResult():
+    global img2
+    result = foundSentence(sentence,figures)
+
+    if result != None:
+        for c in result:
+            hull = cv2.convexHull(c.getContour())
+            (x_center, y_center), radius = cv2.minEnclosingCircle(hull)
+            center = (int(x_center), int(y_center))
+            radius = int(radius)
+            cv2.circle(img2, center, radius, (0, 255, 0), 2)  
     
-sentence = "TOYS"
+sentence = "BOY"
 
 datasetCenters = []
 figures = []
-similarity = {
+dataSimilarity = {
     'A':0.30,
     'B':0.30,
     'C':5.0,
@@ -230,17 +275,18 @@ prepareImg()
 img2= None
 prepareImg2()
 
-letA = datasetCenters[4].getContour()
-print(cv2.contourArea(letA))
+#letA = datasetCenters[4].getContour()
+#print(cv2.contourArea(letA))
 
 for c in figures:
-    similarity = cv2.matchShapes(letA,c.getContour(),cv2.CONTOURS_MATCH_I1, 0.0)
-    if similarity < 71 :
-        hull = cv2.convexHull(c.getContour())
-        (x_center, y_center), radius = cv2.minEnclosingCircle(hull)
-        center = (int(x_center), int(y_center))
-        radius = int(radius)
-        cv2.circle(img2, center, radius, (0, 255, 0), 2) 
+    """ print(str(count) + " " + str(cv2.contourArea(c.getContour())))
+    count += 1 """
+    for letABC in datasetCenters:
+        similarity = cv2.matchShapes(letABC.getContour(),c.getContour(),cv2.CONTOURS_MATCH_I1, 0.0)
+        if similarity < letABC.getSimilarityValue():
+            c.setPosibleLetter(letABC.getLetter())
+            
+finalResult()
 
 
 cv2.imshow("OrderImg", img)
